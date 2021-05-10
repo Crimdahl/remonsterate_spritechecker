@@ -1,0 +1,1 @@
+pyinstaller spritechecker.py -F -n SpriteChecker
