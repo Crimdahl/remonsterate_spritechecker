@@ -8,21 +8,34 @@ try:
     log_file = open("SpriteCheckerLog.txt", "a+")
 except IOError as e:
     print("Error using log file: " + str(e))
-total_sprites = 0
-total_sprites_unchanged = 0
-total_sprites_tmc = 0
-total_sprites_expanded = 0
-total_sprites_cropped = 0
+count_total_sprites = 0
+count_sprites_unchanged = 0
+count_sprites_color_reduced = 0
+count_sprites_mode_changed = 0
+count_sprites_expanded = 0
+count_sprites_cropped = 0
+
+list_sprites_unchanged = []
+list_sprites_color_reduced = []
+list_sprites_mode_changed = []
+list_sprites_expanded = []
+list_sprites_cropped = []
 
 
 def main():
     global exe_directory
     global log_file
-    global total_sprites
-    global total_sprites_unchanged
-    global total_sprites_tmc
-    global total_sprites_expanded
-    global total_sprites_cropped
+    global count_total_sprites
+    global count_sprites_unchanged
+    global count_sprites_color_reduced
+    global count_sprites_expanded
+    global count_sprites_cropped
+    global count_sprites_mode_changed
+    global list_sprites_unchanged
+    global list_sprites_color_reduced
+    global list_sprites_mode_changed
+    global list_sprites_expanded
+    global list_sprites_cropped
 
     try:
         # Populate the file name lists. Iterates through directories starting at the
@@ -48,14 +61,47 @@ def main():
             else:
                 for file_name in files:
                     if file_name.lower().endswith(".png"):
-                        total_sprites = total_sprites + 1
+                        count_total_sprites = count_total_sprites + 1
                         check_image(Image.open(os.path.join(current_walking_directory, file_name)),
                                     current_walking_directory)
-        log("Total sprites: " + str(total_sprites))
-        log("Total sprites unchanged: " + str(total_sprites_unchanged))
-        log("Sprites that had too many colors and were converted: " + str(total_sprites_tmc))
-        log("Sprites that had excess top and/or left borders and were cropped: " + str(total_sprites_cropped))
-        log("Sprites that had the bottom and/or right border expanded: " + str(total_sprites_expanded))
+        log("Total sprites found: " + str(count_total_sprites))
+        log("Total sprites unchanged: " + str(count_sprites_unchanged))
+        log("Count of sprites that had too many colors: " + str(count_sprites_color_reduced))
+        log("Count of sprites that had their mode converted: " + str(count_sprites_mode_changed))
+        log("Count of sprites that were adjusted for efficiency: " +
+            str(count_sprites_cropped + count_sprites_expanded) + '\n')
+
+        index = 1
+        input("Press any key to display a list of sprites that needed no adjustment.")
+        log("Sprites that were unchanged:")
+        for sprite in list_sprites_unchanged:
+            log(str(index) + ': ' + sprite)
+            index = index + 1
+        index = 1
+        log('')
+
+        input("Press any key to display a list of sprites that had too many colors.")
+        log("Sprites that had too many colors:")
+        for sprite in list_sprites_color_reduced:
+            log(str(index) + ': ' + sprite)
+            index = index + 1
+        index = 1
+        log('')
+
+        input("Press any key to display a list of sprites that were converted to be palettised.")
+        log("Sprites that had their mode converted:")
+        for sprite in list_sprites_mode_changed:
+            log(str(index) + ': ' + sprite)
+            index = index + 1
+        index = 1
+        log('')
+
+        input("Press any key to display a list of sprites that were cropped/padded for FF6 efficiency.")
+        log("Count of sprites that were adjusted for efficiency:")
+        for sprite in (list_sprites_cropped + list_sprites_expanded):
+            log(str(index) + ': ' + sprite)
+            index = index + 1
+        log('')
     except Exception as e2:
         log("Exception encountered: " + str(e2))
     finally:
@@ -75,26 +121,42 @@ def get_transparency(image: Image):
 
 def check_image(image: Image, current_directory: str):
     global exe_directory
-    global total_sprites_unchanged
-    global total_sprites_tmc
-    global total_sprites_expanded
-    global total_sprites_cropped
+    global count_sprites_unchanged
+    global count_sprites_color_reduced
+    global count_sprites_expanded
+    global count_sprites_cropped
+    global count_sprites_mode_changed
+    global list_sprites_unchanged
+    global list_sprites_color_reduced
+    global list_sprites_mode_changed
+    global list_sprites_expanded
+    global list_sprites_cropped
 
-    allowed_colors = 0xf
-    image_changed = False
     image_filename = image.filename
-    palette_indexes = set(image.tobytes())
+    image_filename_short = image_filename[len(exe_directory) + 1:]
+    allowed_colors = 16
+    current_colors = len(image.getcolors())
+    image_changed = False
 
-    # Check if the image has too many colors. If so, convert to 16-bit indexed.
-    if max(palette_indexes) > allowed_colors:
+    # Detect images that aren't Palettised. These will be converted later.
+    if image.mode != "P":
+        count_sprites_mode_changed = count_sprites_mode_changed + 1
+        list_sprites_mode_changed.append(image_filename_short)
+        # log('Image will be converted to Mode P (palettised): ' + image_filename)
+
+    # Check if the image has too many colors.
+    if current_colors > allowed_colors:
+        count_sprites_color_reduced = count_sprites_color_reduced + 1
+        list_sprites_color_reduced.append(image_filename_short)
+        # log('Image has too many colors, ' + str(current_colors) + ', and will be reduced: ' + image_filename)
+        # If the image is already palettised, convert to RGBA so it can be re-palettised
         if image.mode == "P":
-            # Images already in P mode cannot be converted to P mode to shrink their allowed colors, so
-            #   temporarily convert them back to RGB
             image = image.convert("RGBA")
+
+    # Convert non-palettised images and restrict their available colors
+    if image.mode != "P":
         image = image.convert("P", palette=Image.ADAPTIVE, colors=allowed_colors)
         image_changed = True
-        total_sprites_tmc = total_sprites_tmc + 1
-        log('Reduced the number of colors to the maximum supported (' + str(allowed_colors) + '): ' + image_filename)
 
     # Check if the top row and left column of the image are excess border
     image = image.convert('RGBA')
@@ -133,9 +195,10 @@ def check_image(image: Image, current_directory: str):
                 image_width_in_pixels, image_height_in_pixels = image.size
 
     if had_transparent_border:
-        log('Cropped extra border space from the top row and left column: ' + image_filename + '.')
+        # log('Cropped extra border space: ' + image_filename + '.')
         image_changed = True
-        total_sprites_cropped = total_sprites_cropped + 1
+        count_sprites_cropped = count_sprites_cropped + 1
+        list_sprites_cropped.append(image_filename_short)
 
     # Tiles are 8x8, so we ensure the image's width and height are divisible by 8
     image_width_in_pixels, image_height_in_pixels = image.size
@@ -153,8 +216,9 @@ def check_image(image: Image, current_directory: str):
         image = ImageOps.expand(image, border=(0, 0, 0, border_width), fill=border_color)
 
     if image_expanded:
-        total_sprites_expanded = total_sprites_expanded + 1
-        log('Expanded the right and bottom borders to fill an 8x8 tile: ' + image_filename)
+        count_sprites_expanded = count_sprites_expanded + 1
+        list_sprites_expanded.append(image_filename_short)
+        # log('Expanded to fill an 8x8 tile: ' + image_filename)
 
     if image_changed:
         # Move the old file to a backup location
@@ -167,8 +231,10 @@ def check_image(image: Image, current_directory: str):
         os.makedirs(os.path.dirname(backup_location), exist_ok=True)
         os.replace(src=image_filename, dst=backup_location)
         image.save(image_filename)
+        # pass
     else:
-        total_sprites_unchanged = total_sprites_unchanged + 1
+        count_sprites_unchanged = count_sprites_unchanged + 1
+        list_sprites_unchanged.append(image_filename_short)
 
 
 def log(line):
@@ -183,7 +249,7 @@ if __name__ == '__main__':
     try:
         print('This program will look through ALL .png files in the programs directory and up to 4 '
               'sub-directories.')
-        print('If a sprite has more than 15 colors, it will be converted to use only 15 colors.')
+        print('If a sprite has more than 16 colors, it will be converted to use only 16 colors.')
         print('If a sprite has a excess border space on the top or left, it will be cropped.')
         print('If a sprite does not evenly fill an 8x8 tile, the bottom and/or right borders will be expanded.')
         print('The original image is saved in a backup directory in the script directory.')
